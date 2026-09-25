@@ -14,17 +14,21 @@ Objective
 import warnings
 import numpy as np
 
-from ssc_block_tv_l1_sliding import sliding_block_diff_matrix, soft_threshold
-
 warnings.filterwarnings("ignore", message=".*matmul.*", category=RuntimeWarning)
 
-# TODO
-# recreate def sliding_block_diff_matrix(): 
+def soft_threshold(x, tau):
+    return np.sign(x) * np.maximum(np.abs(x) - tau, 0.0)
 
-
-# TODO
-def soft_threshold(): 
-    pass
+def sliding_block_diff_matrix(N, k, normalize=True, norm_mode="spectral"):
+    k = max(1, min(int(k), max((N - 1) // 2, 1)))
+    centers = list(range(k, N - k + 1))
+    D = np.zeros((len(centers), N))
+    for r, j in enumerate(centers):
+        D[r, j - k:j] = -1.0 / k
+        D[r, j:j + k] = 1.0 / k
+    if normalize and norm_mode == "spectral":
+        D /= np.linalg.norm(D, 2)
+    return D, centers, k
 
 def ssc_admm_sparse_block_tv(
     Y,

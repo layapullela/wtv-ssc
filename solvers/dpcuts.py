@@ -183,6 +183,19 @@ def cluster_from_C_ordered(C, k, min_size=1, symmetrize=True):
     return labels
 
 
+def cluster_from_C(C, k, k_max=None, min_size=1, method='eigengap',
+                    min_k=2, penalty=0.0):
+    """Contiguous DP Normalized Cut on W = |C| + |C|^T, at a known k only.
+
+    ignore "method" (this is for a legacy experiment to infer k)
+    """
+    return cluster_from_C_ordered(C, k, min_size=min_size)
+
+
+def estimate_k_from_data(Y, **kwargs):
+    pass
+
+
 if __name__ == "__main__":
     # Minimal sanity check on a synthetic 3-block affinity matrix.
     rng = np.random.default_rng(0)

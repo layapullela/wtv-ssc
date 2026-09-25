@@ -1,7 +1,7 @@
 import numpy as np
 from sklearn.utils.extmath import randomized_svd
 
-from ssc_tv import estimate_k_from_data
+from dpcuts import estimate_k_from_data
 
 
 def compute_subspace_distance_sq(X, U):

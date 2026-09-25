@@ -4,7 +4,7 @@ OSC impelmentation, translated to python from https://github.com/sjtrny/SubKit/b
 
 import numpy as np
 
-from ssc_tv import cluster_from_C
+from dpcuts import cluster_from_C
 
 def solve_l1(x, lambda_1):
     # soft thresholding
