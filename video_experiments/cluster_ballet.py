@@ -15,7 +15,7 @@ from PIL import Image
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from common import N_FRAMES_HI, N_FRAMES_LO, SEED, apply_noise, reproduce  # noqa: E402
+from common import N_FRAMES_HI, N_FRAMES_LO, SEED, reproduce  # noqa: E402
 
 DATA_DIR = HERE.parent / "data"
 BALLET_FRAMES_DIR = DATA_DIR / "ballet_dataset" / "frames_tracked"
@@ -113,8 +113,12 @@ def eligible_dancers(dancer_segments, k):
                   if len(segs) >= k and d not in BALLET_EXCLUDED_DANCERS)
 
 
-def fold_test_matrices(dancer_segments, name_to_dir, k, sigma, fold):
-    """The held-out dancer's noisy test matrices for leave-one-dancer-out fold."""
+def fold_test_matrices(dancer_segments, name_to_dir, k, fold):
+    """The held-out dancer's (noise-free) test matrices for leave-one-dancer-out
+    fold. Ballet is not run at sigma > 0 -- we're not interested in adding
+    noise for this dataset -- so there's no noise step here, just the same
+    column-normalization apply_noise would have done at sigma=0.
+    """
     eligible = eligible_dancers(dancer_segments, k)
     if not 0 <= fold < len(eligible):
         raise ValueError(f"fold {fold} out of range: k={k} gives "
@@ -123,8 +127,8 @@ def fold_test_matrices(dancer_segments, name_to_dir, k, sigma, fold):
     frame_rng = np.random.default_rng(SEED + held_out)
     clean = build_pose_matrices(dancer_segments[held_out], k,
                                  BALLET_MATRICES_PER_DANCER, name_to_dir, frame_rng)
-    noise_rng = np.random.default_rng([SEED, held_out])
-    return [(apply_noise(Y01, sigma, noise_rng), labels) for Y01, labels in clean]
+    return [(Y01 / np.maximum(np.linalg.norm(Y01, axis=0, keepdims=True), 1e-12),
+             labels) for Y01, labels in clean]
 
 
 def main():
@@ -132,7 +136,7 @@ def main():
     name_to_dir = {p.name: p for p in sequence_dirs()}
     reproduce(HYPERPARAMS_CSV,
               lambda k, sigma, fold: fold_test_matrices(
-                  dancer_segments, name_to_dir, k, sigma, fold))
+                  dancer_segments, name_to_dir, k, fold))
 
 
 if __name__ == "__main__":
