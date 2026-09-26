@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SSC-Sparse-Block-TV vs SpectralTAD: Hi-C TAD-boundary insulation, inference
+"""WTV-SSC vs SpectralTAD: Hi-C TAD-boundary insulation, inference
 only (no hyperparameter search -- see FROZEN HYPERPARAMETERS below).
 
 Hi-C file
@@ -7,38 +7,25 @@ Hi-C file
 HIC041.hic  (/nfs/turbo/umms-minjilab/lpullela/hic_data/HIC041.hic)
 10 kb resolution, Knight-Ruiz balanced (KR).
 
-Frozen hyperparameters
-----------------------
-Grid-searched ONCE on full-depth (p=1.0) chr1 by
-icassp_ssc_tv2/final_code/hic_experiment/compare_chr1tune_resttest_dp_ncut.py
-(minimize mean_IS - frac_local_min over block_size x lambda_1 x lambda_2);
-see that run's
-results/hic041_100win_chr1tune_chr2to10test_l1_100_dpncut_k4_downsample/
-stoch_fullchr/p_1.0/tune_split.json -> "best". Reused UNCHANGED below across
-every downsample fraction -- this script does no tuning of its own.
+Frozen hyperparameters grid searched on full grid:
 
     block_size = 2
     lambda_1   = 0.001
     lambda_2   = 0.001
     max_iter   = 100
     mu_max     = 10_000.0
-    norm_mode  = "spectral"   (D-normalization; the solver's default)
 
-Cutter: DP-NCut, k in {2, 3, 4}, k_select="argmax" (dp_k_min=2, dp_k_max=4).
+cutter: DP-NCut, k in {2, 3, 4}, k_select="argmax" (dp_k_min=2, dp_k_max=4)
+(this matches reasonable biological sizes for tads)
 Sequential 2 Mb (WINDOW=200 bin) sliding-window scan, MIN_TAD_BINS=5,
 insulation delta=25 bins, 1000 circular-shift permutations per boundary set.
 
-What this runs
---------------
-Test set: chr2-10 (same file/replicate as chr1). For each downsample fraction
-p in {1.0, 0.75, 0.5, 0.25} (p=1.0 is "the test experiment"; p<1 is "the
-downsampling" sweep), each test chromosome is binomial-thinned to p (observed
-NONE counts) then KR-balanced, boundaries are called with the frozen
-hyperparameters above, and insulation is scored against that SAME (matched-
-depth) matrix -- exactly the original run's protocol. (A separate follow-up
-in icassp_ssc_tv2 scores against the full-depth matrix instead, to check
-whether apparent insulation changes with p are real or a downsampling
-artifact in the metric; not reproduced here.)
+This code runs the test set at downsampled fractions. we downsample then 
+do KR normalization.
+
+The boundaries however are found on the downsampled matrices for each p, but
+Insulation scores are computed against the full depth matrix (p = 1) 
+(the full map is more reliable signal for what is really a TAD)
 """
 from __future__ import annotations
 
@@ -107,7 +94,7 @@ def plot_ssc_vs_st_violin(ssc, st, title, out_png, pvalue=None):
             parts[key].set_color("0.2")
     ax.set_xticks([1, 2])
     ax.set_xticklabels([
-        f"SSC\n(n={len(ssc)}, mean={np.mean(ssc):.3f})",
+        f"WTV-SSC\n(n={len(ssc)}, mean={np.mean(ssc):.3f})",
         f"SpectralTAD\n(n={len(st)}, mean={np.mean(st):.3f})",
     ])
     ax.set_ylabel("log2 insulation score")
@@ -125,8 +112,8 @@ def run_one_fraction(args, frac, out_dir):
     per_chrom = []
     test_is_records = []
     print(f"\n=== p={frac:g}  test chroms {args.test_chroms} ===", flush=True)
-    print(f"  {'chrom':>5} {'SSC_n':>6} {'ST_n':>6} {'SSC_z':>8} {'ST_z':>8} "
-          f"{'SSC_IS':>8} {'ST_IS':>8} {'Jac':>7}")
+    print(f"  {'chrom':>5} {'WTV_n':>6} {'ST_n':>6} {'WTV_z':>8} {'ST_z':>8} "
+          f"{'WTV_IS':>8} {'ST_IS':>8} {'Jac':>7}")
     for chrom in args.test_chroms:
         M, n = load_chrom(args.hic, chrom, args.resolution,
                           downsample_frac=frac, downsample_seed_=args.downsample_seed,
@@ -135,11 +122,19 @@ def run_one_fraction(args, frac, out_dir):
         tv_tads = run_block_tv_tad(M, n, lo, hi, WINDOW, MIN_TAD_BINS, SOLVER_KWARGS,
                                    DP_K_MIN, DP_K_MAX, DP_K_SELECT, verbose=False)
         spec_tads = run_spectral_tad(M, n, lo, hi, WINDOW, MIN_TAD_BINS, verbose=False)
-        ins = compute_insulation_score(M, n, INSULATION_DELTA)
+        if frac < 1.0:
+            M_full, n_full = load_chrom(args.hic, chrom, args.resolution,
+                                        downsample_frac=1.0,
+                                        downsample_seed_=args.downsample_seed,
+                                        tag="test-full-depth")
+            ins = compute_insulation_score(M_full, n_full, INSULATION_DELTA)
+            del M_full
+        else:
+            ins = compute_insulation_score(M, n, INSULATION_DELTA)
         tv_sc = score_region(tv_tads, ins, lo, hi, N_PERM)
         st_sc = score_region(spec_tads, ins, lo, hi, N_PERM)
         agr = boundary_agreement(tv_sc["boundaries"], st_sc["boundaries"])
-        tv_recs = boundary_is_records(chrom, "SSC", tv_tads, ins, lo, hi)
+        tv_recs = boundary_is_records(chrom, "WTV-SSC", tv_tads, ins, lo, hi)
         st_recs = boundary_is_records(chrom, "SpectralTAD", spec_tads, ins, lo, hi)
         test_is_records.extend(tv_recs)
         test_is_records.extend(st_recs)
@@ -156,8 +151,8 @@ def run_one_fraction(args, frac, out_dir):
               f"{row['tv_z']:8.2f} {row['spec_z']:8.2f} "
               f"{row['tv_mean_is']:8.3f} {row['spec_mean_is']:8.3f} "
               f"{row['jaccard']:7.3f}", flush=True)
-        write_bed(tv_tads, chrom, str(out_dir / f"ssc_dpncut_chr{chrom}.bed"),
-                  "SSC_DPNCut", f"bs={SOLVER_KWARGS['block_size']} k<={DP_K_MAX}")
+        write_bed(tv_tads, chrom, str(out_dir / f"wtv_ssc_dpncut_chr{chrom}.bed"),
+                  "WTV-SSC_DPNCut", f"bs={SOLVER_KWARGS['block_size']} k<={DP_K_MAX}")
         write_bed(spec_tads, chrom, str(out_dir / f"spectral_tad_chr{chrom}.bed"),
                   "SpectralTAD", "KR")
         del M, ins, tv_tads, spec_tads
@@ -167,10 +162,10 @@ def run_one_fraction(args, frac, out_dir):
         return float(np.mean(vals)) if vals else float("nan")
 
     print(f"  unweighted mean over {len(per_chrom)} chroms")
-    print(f"    SSC+DP-NCut z={mean_key('tv_z'):.2f}  mean_IS={mean_key('tv_mean_is'):.3f}")
+    print(f"    WTV-SSC+DP-NCut z={mean_key('tv_z'):.2f}  mean_IS={mean_key('tv_mean_is'):.3f}")
     print(f"    SpectralTAD  z={mean_key('spec_z'):.2f}  mean_IS={mean_key('spec_mean_is'):.3f}")
 
-    ssc_scores = [r["insulation"] for r in test_is_records if r["method"] == "SSC"]
+    ssc_scores = [r["insulation"] for r in test_is_records if r["method"] == "WTV-SSC"]
     st_scores = [r["insulation"] for r in test_is_records if r["method"] == "SpectralTAD"]
     mw_u, mw_p = _mw_u(ssc_scores, st_scores) if ssc_scores and st_scores else (float("nan"),) * 2
 
@@ -183,6 +178,7 @@ def run_one_fraction(args, frac, out_dir):
 
     summary = dict(
         hic=args.hic, downsample_frac=frac, downsample_seed=args.downsample_seed,
+        scored_against_full_depth=bool(frac < 1.0),
         test_chroms=list(args.test_chroms), solver_kwargs=SOLVER_KWARGS,
         dp_k_min=DP_K_MIN, dp_k_max=DP_K_MAX, dp_k_select=DP_K_SELECT,
         per_chrom=per_chrom, mean_tv_z=mean_key("tv_z"), mean_spec_z=mean_key("spec_z"),
@@ -201,7 +197,8 @@ def run_one_fraction(args, frac, out_dir):
 
     plot_ssc_vs_st_violin(
         ssc_scores, st_scores,
-        f"Test-set boundary insulation (chr {args.test_chroms}) p={frac:g}",
+        f"Test-set boundary insulation (chr {args.test_chroms}) p={frac:g}"
+        + ("  (scored vs full-depth p=1)" if frac < 1.0 else ""),
         str(out_dir / "test_insulation_violin.png"), pvalue=mw_p)
     return summary
 
@@ -213,12 +210,12 @@ def plot_across_fractions(summaries, out_dir):
     fracs = [s["downsample_frac"] for s in summaries]
     fig, ax = plt.subplots(figsize=(6.0, 4.6))
     ax.plot(fracs, [s["test_insulation_median_ssc"] for s in summaries], "-o",
-            color="#c0392b", label="SSC median IS")
+            color="#c0392b", label="WTV-SSC median IS")
     ax.plot(fracs, [s["test_insulation_median_st"] for s in summaries], "-o",
             color="#2c5aa0", label="SpectralTAD median IS")
     ax.set_xlabel("downsample fraction p")
     ax.set_ylabel("median log2 insulation score")
-    ax.set_title("Test-set insulation vs downsampling (matched-depth scoring)")
+    ax.set_title("Test-set insulation vs downsampling (scored vs full-depth p=1)")
     ax.legend(fontsize=9)
     ax.invert_xaxis()
     fig.tight_layout()
@@ -241,7 +238,7 @@ def main():
     args = p.parse_args()
 
     print(f"HIC {args.hic}  10 kb  observed (NONE) -> binomial -> Knight-Ruiz")
-    print(f"SSC solver_kwargs: {SOLVER_KWARGS}")
+    print(f"WTV-SSC solver_kwargs: {SOLVER_KWARGS}")
     print(f"Test chr {args.test_chroms}  downsample fracs {args.downsample_fracs}")
 
     out_root = Path(args.out_dir)

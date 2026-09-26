@@ -2,6 +2,7 @@
   "hic": "/nfs/turbo/umms-minjilab/lpullela/hic_data/HIC041.hic",
   "downsample_frac": 1.0,
   "downsample_seed": 0,
+  "scored_against_full_depth": false,
   "test_chroms": [
     "2",
     "3",

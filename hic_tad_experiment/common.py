@@ -454,7 +454,7 @@ def dp_ncut_silhouette_cuts(A, Y, min_size, k_min=2, k_max=4, k_select="argmax")
     return best_cuts
 
 
-# ── SSC-Sparse-Block-TV cutter + scan ───────────────────────────────────────
+# ── WTV-SSC cutter + scan ────────────────────────────────────────────────────
 
 def block_tv_cut_fn(M_sparse, min_tad_bins, solver_kwargs, dp_k_min=2, dp_k_max=4,
                     dp_k_select="argmax"):
