@@ -209,10 +209,7 @@ def load_chrom(hic, chrom, resolution, downsample_frac=1.0, downsample_seed_=0, 
     """Load one chromosome's observed (NONE) counts, binomial-thin to
     ``downsample_frac`` (no-op at 1.0), then Knight-Ruiz balance ourselves.
 
-    The original run this reproduces always passes --observed-kr, i.e. it
-    recomputes KR from raw observed counts even at p=1.0 rather than using
-    the .hic file's own pre-balanced "KR" vectors -- matching that (not the
-    file's KR) is what made this port's numbers reproduce the original's."""
+    We have a KR function implementation which is compatible w/ downsampling."""
     prefix = f"{tag} " if tag else ""
     frac = float(downsample_frac)
     print(f"Loading {prefix}chr{chrom} observed (p={frac:g}) ...", flush=True)
@@ -272,7 +269,7 @@ def silhouette_postprocess(tads, min_tad_bins=MIN_TAD_BINS):
     return [t for t in tads if t[1] - t[0] >= min_tad_bins]
 
 
-# ── SpectralTAD reference cutter (unit-circle embedding) ───────────────────
+# ── SpectralTAD reference cutter (plus unit-circle embedding) ───────────────────
 
 def _unit_circle_gaps(A):
     """Two largest-magnitude eigenpairs of the degree-normalized affinity,
@@ -457,9 +454,10 @@ def dp_ncut_silhouette_cuts(A, Y, min_size, k_min=2, k_max=4, k_select="argmax")
 # ── WTV-SSC cutter + scan ────────────────────────────────────────────────────
 
 def block_tv_cut_fn(M_sparse, min_tad_bins, solver_kwargs, dp_k_min=2, dp_k_max=4,
-                    dp_k_select="argmax"):
-    """Cutter: affinity W = |Z| + |Z^T| from ssc_admm_sparse_block_tv, cut by
-    DP-NCut over k in [dp_k_min, dp_k_max]."""
+                    dp_k_select="argmax", col_norm=False):
+    """Cutter: affinity W = |Z| + |Z^T| from wtv-ssc, cut by
+    DP-NCut over k in [dp_k_min, dp_k_max]. col_norm=True unit-normalizes the
+    columns of each window before the solver (Algorithm 1, step 1)."""
     def cut(pos, end):
         Y_raw = M_sparse[pos:end, pos:end].toarray()
         keep = np.flatnonzero(Y_raw.any(axis=0))
@@ -470,6 +468,8 @@ def block_tv_cut_fn(M_sparse, min_tad_bins, solver_kwargs, dp_k_min=2, dp_k_max=
             return None, None
         Y_sol = Y.copy()
         np.fill_diagonal(Y_sol, 0.0)
+        if col_norm:
+            Y_sol /= np.maximum(np.linalg.norm(Y_sol, axis=0, keepdims=True), 1e-12)
         Z, _C, _info = ssc_admm_sparse_block_tv(Y_sol, **solver_kwargs)
         A = np.abs(Z) + np.abs(Z.T)
         cuts = dp_ncut_silhouette_cuts(A, Y, min_tad_bins, dp_k_min, dp_k_max, dp_k_select)
@@ -480,9 +480,9 @@ def block_tv_cut_fn(M_sparse, min_tad_bins, solver_kwargs, dp_k_min=2, dp_k_max=
 
 def run_block_tv_tad(M_sparse, n_bins, start_bin, end_bin, window, min_tad_bins,
                      solver_kwargs, dp_k_min=2, dp_k_max=4, dp_k_select="argmax",
-                     verbose=True):
+                     verbose=True, col_norm=False):
     cut = block_tv_cut_fn(M_sparse, min_tad_bins, solver_kwargs, dp_k_min, dp_k_max,
-                          dp_k_select)
+                          dp_k_select, col_norm)
     tads = _scan_region(cut, start_bin, end_bin, window, min_tad_bins, verbose=verbose)
     return silhouette_postprocess(tads, min_tad_bins)
 
@@ -512,62 +512,11 @@ def compute_insulation_score(M_sparse, n_bins, delta=25):
     return out
 
 
-def insulation_at_boundaries(insulation, bounds, lo, hi, n_perm=1000, seed=0):
-    """Score a boundary set by insulation against a circular-shift null (mean
-    insulation improves mechanically as boundaries thin out, so the raw mean
-    is only comparable via this null's z-score)."""
-    span = hi - lo
-    scored = [b for b in bounds if lo <= b < hi and np.isfinite(insulation[b])]
-    empty = dict(n_bounds=len(bounds), n_scored=0, mean=np.nan, median=np.nan,
-                 null_mean=np.nan, null_sd=np.nan, z=np.nan, p=np.nan,
-                 frac_local_min=np.nan)
-    if not scored or span <= 1:
-        return empty
-    obs = float(np.mean([insulation[b] for b in scored]))
-    barr = np.asarray(bounds)
-    rng = np.random.default_rng(seed)
-    null = []
-    for shift in rng.integers(1, span, n_perm):
-        shifted = (barr - lo + shift) % span + lo
-        vals = insulation[shifted]
-        vals = vals[np.isfinite(vals)]
-        if vals.size:
-            null.append(vals.mean())
-    if not null:
-        return {**empty, "n_scored": len(scored), "mean": obs}
-    null = np.asarray(null)
-    sd = float(null.std())
-    delta_local = 3
-    local = [
-        insulation[b] <= np.nanmin(insulation[max(b - delta_local, 0):b + delta_local + 1])
-        for b in scored
-    ]
-    return dict(
-        n_bounds=len(bounds), n_scored=len(scored), mean=obs,
-        median=float(np.median([insulation[b] for b in scored])),
-        null_mean=float(null.mean()), null_sd=sd,
-        z=float((obs - null.mean()) / sd) if sd > 0 else np.nan,
-        p=float((null <= obs).mean()), frac_local_min=float(np.mean(local)),
-    )
-
-
-def boundary_agreement(bounds_a, bounds_b, tol=3):
-    """Symmetric agreement between two boundary sets, matched within tol bins."""
-    n_a, n_b = len(bounds_a), len(bounds_b)
-    if not n_a and not n_b:
-        return dict(jaccard=1.0, frac_a_matched=1.0, frac_b_matched=1.0, f1=1.0)
-    if not n_a or not n_b:
-        return dict(jaccard=0.0, frac_a_matched=0.0, frac_b_matched=0.0, f1=0.0)
-    a_arr, b_arr = np.array(sorted(bounds_a)), np.array(sorted(bounds_b))
-    matched_a = int(np.sum([np.any(np.abs(b_arr - a) <= tol) for a in a_arr]))
-    matched_b = int(np.sum([np.any(np.abs(a_arr - b) <= tol) for b in b_arr]))
-    frac_a, frac_b = matched_a / n_a, matched_b / n_b
-    union = matched_a + (n_a - matched_a) + (n_b - matched_b)
-    return dict(
-        jaccard=matched_a / union if union else 0.0,
-        frac_a_matched=frac_a, frac_b_matched=frac_b,
-        f1=2 * frac_a * frac_b / (frac_a + frac_b) if (frac_a + frac_b) else 0.0,
-    )
+def insulation_at_boundaries(insulation, bounds, lo, hi):
+    """Median insulation over the boundaries in [lo, hi) with a finite score."""
+    scored = [insulation[b] for b in bounds if lo <= b < hi and np.isfinite(insulation[b])]
+    return dict(n_bounds=len(bounds), n_scored=len(scored),
+                median=float(np.median(scored)) if scored else np.nan)
 
 
 def tad_boundaries(tads):
@@ -589,9 +538,9 @@ def tad_statistics(tads):
     )
 
 
-def score_region(tads, insulation, lo, hi, n_perm):
+def score_region(tads, insulation, lo, hi):
     stats = tad_statistics(tads)
-    ins = insulation_at_boundaries(insulation, stats["boundaries"], lo, hi, n_perm)
+    ins = insulation_at_boundaries(insulation, stats["boundaries"], lo, hi)
     return {**stats, "insulation": ins}
 
 
