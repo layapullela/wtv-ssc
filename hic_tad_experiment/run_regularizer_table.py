@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """ we test effect of  WTV regularizer on vs. off experiment 
 for SSC on HIC041, with SpectralTAD as a reference, inference only.
+This experiment is to ablate whether window tv regularizer specifically helps
+SSC for TAD detection task.
 
 Boundaries are called on chr2-10 downsampled to p, insulation score on full depth.
 Every method uses the same 2 Mb scan. DP Ncuts w/ silhouette score {2,3,4}
