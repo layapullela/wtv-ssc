@@ -48,3 +48,12 @@ mean_IS - frac_local_min, with IS computed on the matched-depth chr1.
 The best config per arm and depth was frozen and tested on chr2-10 at the same p, over downsampling seeds 0-10
 (p=1 is a single run, since there is no downsampling). The tuning code lives outside this repo (sandbox).
 
+
+
+# new result
+|p|WTV-SSC|SSC without TV|SpectralTAD|Seeds TV better|
+|---|---|---|---|---|
+|1.00|**−0.3525**|−0.3177|−0.1913|single run|
+|0.75|**−0.3909 ± 0.0027**|−0.3385 ± 0.0032|−0.1860 ± 0.0047|11/11|
+|0.50|**−0.3786 ± 0.0025**|−0.3339 ± 0.0045|−0.1764 ± 0.0069|11/11|
+|0.25|−0.3212 ± 0.0037|**−0.3321 ± 0.0040**|−0.1656 ± 0.0066|0/11|
