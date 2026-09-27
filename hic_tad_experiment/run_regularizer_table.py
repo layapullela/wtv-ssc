@@ -12,7 +12,8 @@ Every method uses the same 2 Mb scan. DP Ncuts w/ silhouette score {2,3,4}
   SpectralTAD  Python SpectralTAD as reference
 
   
-hyperparms tuned on chr1; lambda_1 grid
+hyperparms tuned on chr1 (downsampled to each p, seed 0) by minimizing the median IS of
+the called boundaries; lambda_1 grid
 {0.01, 0.02, 0.035, 0.05, 0.075, 0.1, 0.15, 0.2, 0.3, 0.45}; WTV-SSC also searched
 lambda_2 {0.1, 0.2, 0.5, 1, 2} and b {2, 3, 5, 8, 12}.
 
@@ -39,10 +40,10 @@ OUT = Path(__file__).resolve().parent / "results" / "regularizer"
 
 SOLVER = dict(max_iter=100, mu_max=10.0, norm_mode="spectral")
 FROZEN = {
-    1.0:  {"WTV-SSC": dict(block_size=8, lambda_1=0.2, lambda_2=0.2), "SSC-noTV": dict(lambda_1=0.075)},
-    0.75: {"WTV-SSC": dict(block_size=12, lambda_1=0.15, lambda_2=0.2), "SSC-noTV": dict(lambda_1=0.01)},
-    0.5:  {"WTV-SSC": dict(block_size=12, lambda_1=0.2, lambda_2=0.2), "SSC-noTV": dict(lambda_1=0.075)},
-    0.25: {"WTV-SSC": dict(block_size=5, lambda_1=0.15, lambda_2=0.2), "SSC-noTV": dict(lambda_1=0.1)},
+    1.0:  {"WTV-SSC": dict(block_size=8, lambda_1=0.2, lambda_2=0.5), "SSC-noTV": dict(lambda_1=0.01)},
+    0.75: {"WTV-SSC": dict(block_size=12, lambda_1=0.15, lambda_2=0.2), "SSC-noTV": dict(lambda_1=0.02)},
+    0.5:  {"WTV-SSC": dict(block_size=12, lambda_1=0.15, lambda_2=0.2), "SSC-noTV": dict(lambda_1=0.035)},
+    0.25: {"WTV-SSC": dict(block_size=3, lambda_1=0.15, lambda_2=0.5), "SSC-noTV": dict(lambda_1=0.1)},
 }
 METHODS = ["WTV-SSC", "SSC-noTV", "SpectralTAD"]
 

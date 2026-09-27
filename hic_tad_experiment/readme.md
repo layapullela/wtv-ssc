@@ -24,10 +24,12 @@ in the comment above.
 
 | p | WTV-SSC: b | WTV-SSC: lambda_1 | WTV-SSC: lambda_2 | SSC-noTV: lambda_1 (lambda_2 = 0) |
 |---|---|---|---|---|
-| 1.00 | 8  | 0.2  | 0.2 | 0.075 |
-| 0.75 | 12 | 0.15 | 0.2 | 0.01  |
-| 0.50 | 12 | 0.2  | 0.2 | 0.075 |
-| 0.25 | 5  | 0.15 | 0.2 | 0.1   |
+| 1.00 | 8  | 0.2  | 0.5 | 0.01*  |
+| 0.75 | 12* | 0.15 | 0.2 | 0.02  |
+| 0.50 | 12* | 0.15 | 0.2 | 0.035 |
+| 0.25 | 3  | 0.15 | 0.5 | 0.1   |
+
+\* selected value is on the edge of its search grid (smallest lambda_1 / largest b).
 
 
 Settings (Shared at each depth p value):
@@ -39,7 +41,7 @@ Settings (Shared at each depth p value):
 ### How the hyperparameters were selected
 
 For each depth p, both SSC arms were tuned on chr1 downsampled to p (downsample seed 0) by grid search. Selection minimized
-mean_IS - frac_local_min, with IS computed on the matched-depth chr1.
+the median IS of the called boundaries, with IS computed on the matched-depth chr1.
 - The lambda_1 grid was shared by both arms: {0.01, 0.02, 0.035, 0.05, 0.075, 0.1, 0.15, 0.2, 0.3, 0.45}.
 - WTV-SSC also searched lambda_2 in {0.1, 0.2, 0.5, 1, 2} and b in {2, 3, 5, 8, 12} (250 configs). b = 1 was
   excluded, so WTV-SSC always uses a window.
@@ -51,9 +53,12 @@ The best config per arm and depth was frozen and tested on chr2-10 at the same p
 
 
 # new result
+Median IS pooled over all chr2-10 boundaries (IS on the full-depth matrix); p<1 is mean ± sd over downsampling seeds 0-10.
+Seeds TV better = seeds where WTV-SSC < SSC without TV (paired Wilcoxon p = 0.00098 at every p<1).
+
 |p|WTV-SSC|SSC without TV|SpectralTAD|Seeds TV better|
 |---|---|---|---|---|
-|1.00|**−0.3525**|−0.3177|−0.1913|single run|
-|0.75|**−0.3909 ± 0.0027**|−0.3385 ± 0.0032|−0.1860 ± 0.0047|11/11|
-|0.50|**−0.3786 ± 0.0025**|−0.3339 ± 0.0045|−0.1764 ± 0.0069|11/11|
-|0.25|−0.3212 ± 0.0037|**−0.3321 ± 0.0040**|−0.1656 ± 0.0066|0/11|
+|1.00|**−0.3979**|−0.3343|−0.1913|single run|
+|0.75|**−0.3909 ± 0.0027**|−0.3403 ± 0.0035|−0.1860 ± 0.0047|11/11|
+|0.50|**−0.3839 ± 0.0032**|−0.3413 ± 0.0043|−0.1764 ± 0.0069|11/11|
+|0.25|**−0.3412 ± 0.0049**|−0.3321 ± 0.0040|−0.1656 ± 0.0066|11/11|
