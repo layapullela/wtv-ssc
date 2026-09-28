@@ -2,3 +2,4 @@
 *logs
 *.sbatch
 **smoke_test.py**
+archived_wtv_ssc
