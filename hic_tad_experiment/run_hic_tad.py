@@ -18,7 +18,8 @@ Frozen hyperparameters grid searched on full grid:
 cutter: DP-NCut, k in {2, 3, 4}, k_select="argmax" (dp_k_min=2, dp_k_max=4)
 (this matches reasonable biological sizes for tads)
 Sequential 2 Mb (WINDOW=200 bin) sliding-window scan, MIN_TAD_BINS=5,
-insulation delta=25 bins, 1000 circular-shift permutations per boundary set.
+insulation delta=25 bins; reported metric is the median insulation score (IS)
+at called boundaries.
 
 This code runs the test set at downsampled fractions. we downsample then 
 do KR normalization.
@@ -40,7 +41,6 @@ from common import (
     BINSIZE,
     MIN_TAD_BINS,
     WINDOW,
-    boundary_agreement,
     boundary_is_records,
     compute_insulation_score,
     load_chrom,
@@ -59,7 +59,6 @@ SOLVER_KWARGS = dict(
 )
 DP_K_MIN, DP_K_MAX, DP_K_SELECT = 2, 4, "argmax"
 INSULATION_DELTA = 25
-N_PERM = 1000
 
 
 def _finite(x):
@@ -94,8 +93,8 @@ def plot_ssc_vs_st_violin(ssc, st, title, out_png, pvalue=None):
             parts[key].set_color("0.2")
     ax.set_xticks([1, 2])
     ax.set_xticklabels([
-        f"WTV-SSC\n(n={len(ssc)}, mean={np.mean(ssc):.3f})",
-        f"SpectralTAD\n(n={len(st)}, mean={np.mean(st):.3f})",
+        f"WTV-SSC\n(n={len(ssc)}, median={np.median(ssc):.3f})",
+        f"SpectralTAD\n(n={len(st)}, median={np.median(st):.3f})",
     ])
     ax.set_ylabel("log2 insulation score")
     if pvalue is not None and pvalue == pvalue:
@@ -112,15 +111,15 @@ def run_one_fraction(args, frac, out_dir):
     per_chrom = []
     test_is_records = []
     print(f"\n=== p={frac:g}  test chroms {args.test_chroms} ===", flush=True)
-    print(f"  {'chrom':>5} {'WTV_n':>6} {'ST_n':>6} {'WTV_z':>8} {'ST_z':>8} "
-          f"{'WTV_IS':>8} {'ST_IS':>8} {'Jac':>7}")
+    print(f"  {'chrom':>5} {'WTV_n':>6} {'ST_n':>6} {'WTV_medIS':>10} {'ST_medIS':>10}")
     for chrom in args.test_chroms:
         M, n = load_chrom(args.hic, chrom, args.resolution,
                           downsample_frac=frac, downsample_seed_=args.downsample_seed,
                           tag="test")
         lo, hi = 0, n
         tv_tads = run_block_tv_tad(M, n, lo, hi, WINDOW, MIN_TAD_BINS, SOLVER_KWARGS,
-                                   DP_K_MIN, DP_K_MAX, DP_K_SELECT, verbose=False)
+                                   DP_K_MIN, DP_K_MAX, DP_K_SELECT, verbose=False,
+                                   col_norm=False)
         spec_tads = run_spectral_tad(M, n, lo, hi, WINDOW, MIN_TAD_BINS, verbose=False)
         if frac < 1.0:
             M_full, n_full = load_chrom(args.hic, chrom, args.resolution,
@@ -131,9 +130,8 @@ def run_one_fraction(args, frac, out_dir):
             del M_full
         else:
             ins = compute_insulation_score(M, n, INSULATION_DELTA)
-        tv_sc = score_region(tv_tads, ins, lo, hi, N_PERM)
-        st_sc = score_region(spec_tads, ins, lo, hi, N_PERM)
-        agr = boundary_agreement(tv_sc["boundaries"], st_sc["boundaries"])
+        tv_sc = score_region(tv_tads, ins, lo, hi)
+        st_sc = score_region(spec_tads, ins, lo, hi)
         tv_recs = boundary_is_records(chrom, "WTV-SSC", tv_tads, ins, lo, hi)
         st_recs = boundary_is_records(chrom, "SpectralTAD", spec_tads, ins, lo, hi)
         test_is_records.extend(tv_recs)
@@ -141,33 +139,24 @@ def run_one_fraction(args, frac, out_dir):
         row = dict(
             chrom=chrom, n_bins=n,
             tv_n_tads=tv_sc["n_tads"], spec_n_tads=st_sc["n_tads"],
-            tv_z=tv_sc["insulation"]["z"], spec_z=st_sc["insulation"]["z"],
-            tv_mean_is=tv_sc["insulation"]["mean"], spec_mean_is=st_sc["insulation"]["mean"],
-            tv_frac=tv_sc["insulation"]["frac_local_min"],
-            spec_frac=st_sc["insulation"]["frac_local_min"], jaccard=agr["jaccard"],
+            tv_median_is=tv_sc["insulation"]["median"], spec_median_is=st_sc["insulation"]["median"],
         )
         per_chrom.append(row)
         print(f"  {chrom:>5} {row['tv_n_tads']:6d} {row['spec_n_tads']:6d} "
-              f"{row['tv_z']:8.2f} {row['spec_z']:8.2f} "
-              f"{row['tv_mean_is']:8.3f} {row['spec_mean_is']:8.3f} "
-              f"{row['jaccard']:7.3f}", flush=True)
+              f"{row['tv_median_is']:10.4f} {row['spec_median_is']:10.4f}", flush=True)
         write_bed(tv_tads, chrom, str(out_dir / f"wtv_ssc_dpncut_chr{chrom}.bed"),
                   "WTV-SSC_DPNCut", f"bs={SOLVER_KWARGS['block_size']} k<={DP_K_MAX}")
         write_bed(spec_tads, chrom, str(out_dir / f"spectral_tad_chr{chrom}.bed"),
                   "SpectralTAD", "KR")
         del M, ins, tv_tads, spec_tads
 
-    def mean_key(key):
-        vals = [r[key] for r in per_chrom if r[key] == r[key]]
-        return float(np.mean(vals)) if vals else float("nan")
-
-    print(f"  unweighted mean over {len(per_chrom)} chroms")
-    print(f"    WTV-SSC+DP-NCut z={mean_key('tv_z'):.2f}  mean_IS={mean_key('tv_mean_is'):.3f}")
-    print(f"    SpectralTAD  z={mean_key('spec_z'):.2f}  mean_IS={mean_key('spec_mean_is'):.3f}")
-
     ssc_scores = [r["insulation"] for r in test_is_records if r["method"] == "WTV-SSC"]
     st_scores = [r["insulation"] for r in test_is_records if r["method"] == "SpectralTAD"]
     mw_u, mw_p = _mw_u(ssc_scores, st_scores) if ssc_scores and st_scores else (float("nan"),) * 2
+    med = lambda v: float(np.median(v)) if v else float("nan")
+    print(f"  median IS pooled over chr {args.test_chroms}: WTV-SSC {med(ssc_scores):.4f} "
+          f"(n={len(ssc_scores)})  SpectralTAD {med(st_scores):.4f} (n={len(st_scores)})  "
+          f"Mann-Whitney p={_fmt_pvalue(mw_p)}", flush=True)
 
     csv_path = out_dir / "test_boundary_insulation.csv"
     with csv_path.open("w", newline="") as fh:
@@ -181,14 +170,9 @@ def run_one_fraction(args, frac, out_dir):
         scored_against_full_depth=bool(frac < 1.0),
         test_chroms=list(args.test_chroms), solver_kwargs=SOLVER_KWARGS,
         dp_k_min=DP_K_MIN, dp_k_max=DP_K_MAX, dp_k_select=DP_K_SELECT,
-        per_chrom=per_chrom, mean_tv_z=mean_key("tv_z"), mean_spec_z=mean_key("spec_z"),
-        mean_tv_is=mean_key("tv_mean_is"), mean_spec_is=mean_key("spec_mean_is"),
-        mean_jaccard=mean_key("jaccard"),
+        per_chrom=per_chrom,
         test_insulation_n_ssc=len(ssc_scores), test_insulation_n_st=len(st_scores),
-        test_insulation_mean_ssc=float(np.mean(ssc_scores)) if ssc_scores else float("nan"),
-        test_insulation_median_ssc=float(np.median(ssc_scores)) if ssc_scores else float("nan"),
-        test_insulation_mean_st=float(np.mean(st_scores)) if st_scores else float("nan"),
-        test_insulation_median_st=float(np.median(st_scores)) if st_scores else float("nan"),
+        test_insulation_median_ssc=med(ssc_scores), test_insulation_median_st=med(st_scores),
         test_insulation_mw_u=mw_u, test_insulation_pvalue=mw_p,
     )
     out_json = out_dir / "test_summary.json"
