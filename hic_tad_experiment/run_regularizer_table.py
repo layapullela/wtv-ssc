@@ -10,6 +10,8 @@ Every method uses the same 2 Mb scan. DP Ncuts w/ silhouette score {2,3,4}
   WTV-SSC   column-normalized SSC + sliding-window TV (lambda_2 > 0, b >= 2)
   SSC-noTV  the same solver with lambda_2 = 0
   SpectralTAD  Python SpectralTAD as reference
+  DPNCut-colnorm  DP-NCut without SSC on the column-normalized window (W = |Yn| + |Yn^T|);
+                  no hyperparameters
 
   
 hyperparms tuned on chr1 (downsampled to each p, seed 0) by minimizing the median IS of
@@ -28,7 +30,7 @@ import numpy as np
 from scipy.stats import wilcoxon
 
 from common import (MIN_TAD_BINS, WINDOW, boundary_is_records, compute_insulation_score,
-                    load_chrom, run_block_tv_tad, run_spectral_tad)
+                    load_chrom, run_block_tv_tad, run_dpncut_tad, run_spectral_tad)
 
 HIC041 = "/nfs/turbo/umms-minjilab/lpullela/hic_data/HIC041.hic"
 RESOLUTION = 10_000
@@ -45,17 +47,20 @@ FROZEN = {
     0.5:  {"WTV-SSC": dict(block_size=12, lambda_1=0.15, lambda_2=0.2), "SSC-noTV": dict(lambda_1=0.035)},
     0.25: {"WTV-SSC": dict(block_size=3, lambda_1=0.15, lambda_2=0.5), "SSC-noTV": dict(lambda_1=0.1)},
 }
-METHODS = ["WTV-SSC", "SSC-noTV", "SpectralTAD"]
+METHODS = ["WTV-SSC", "SSC-noTV", "SpectralTAD", "DPNCut-colnorm"]
 
 
 def call_tads(method, M, n, frac):
     if method == "SpectralTAD":
         return run_spectral_tad(M, n, 0, n, WINDOW, MIN_TAD_BINS, verbose=False)
+    if method == "DPNCut-colnorm":
+        return run_dpncut_tad(M, n, 0, n, WINDOW, MIN_TAD_BINS, 2, 4, "argmax",
+                              verbose=False)
     cfg = FROZEN[frac][method]
     kw = dict(block_size=cfg.get("block_size", 2), lambda_1=cfg["lambda_1"],
               lambda_2=cfg.get("lambda_2", 0.0), **SOLVER)
     return run_block_tv_tad(M, n, 0, n, WINDOW, MIN_TAD_BINS, kw, 2, 4, "argmax",
-                            verbose=False, col_norm=True)
+                            verbose=False)
 
 
 def run_unit(frac, seed):
@@ -84,11 +89,12 @@ def summarize():
     lines = ["# HIC041: WTV regularizer ON vs OFF (column-normalized SSC)", "",
              "Median IS pooled over all chr2-10 boundaries (IS on the full-depth matrix). "
              "p=1 is a single run; p<1 is mean ± sd over downsampling seeds 0-10.", "",
-             "| p | WTV-SSC median IS | SSC (no TV) median IS | SpectralTAD median IS | seeds WTV < no-TV | paired Wilcoxon p |",
-             "|---|---|---|---|---|---|"]
+             "| p | WTV-SSC median IS | SSC (no TV) median IS | SpectralTAD median IS | DP-NCut (col-norm) median IS | seeds WTV < no-TV | paired Wilcoxon p |",
+             "|---|---|---|---|---|---|---|"]
     for frac in FRACS:
         runs = [json.loads(f.read_text()) for f in sorted(OUT.glob(f"p_{frac:g}_seed_*.json"))]
-        runs = [r for r in runs if r["frozen"] == FROZEN[frac]]   # skip results from other configs
+        runs = [r for r in runs if r["frozen"] == FROZEN[frac]   # skip results from other configs
+                and all(m in r["median_IS"] for m in METHODS)]     # or from before a method was added
         if not runs:
             continue
         v = {m: np.array([r["median_IS"][m] for r in runs]) for m in METHODS}
@@ -96,7 +102,7 @@ def summarize():
         d = v["WTV-SSC"] - v["SSC-noTV"]
         p = f"{wilcoxon(d).pvalue:.2g}" if len(d) > 5 else "n/a"
         lines.append(f"| {frac:.2f} | {cell(v['WTV-SSC'])} | {cell(v['SSC-noTV'])} | "
-                     f"{cell(v['SpectralTAD'])} | {int((d < 0).sum())}/{len(d)} | {p} |")
+                     f"{cell(v['SpectralTAD'])} | {cell(v['DPNCut-colnorm'])} | {int((d < 0).sum())}/{len(d)} | {p} |")
     (OUT / "regularizer_table.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
 

@@ -454,10 +454,11 @@ def dp_ncut_silhouette_cuts(A, Y, min_size, k_min=2, k_max=4, k_select="argmax")
 # ── WTV-SSC cutter + scan ────────────────────────────────────────────────────
 
 def block_tv_cut_fn(M_sparse, min_tad_bins, solver_kwargs, dp_k_min=2, dp_k_max=4,
-                    dp_k_select="argmax", col_norm=False):
+                    dp_k_select="argmax", col_norm=True):
     """Cutter: affinity W = |Z| + |Z^T| from wtv-ssc, cut by
-    DP-NCut over k in [dp_k_min, dp_k_max]. col_norm=True unit-normalizes the
-    columns of each window before the solver (Algorithm 1, step 1)."""
+    DP-NCut over k in [dp_k_min, dp_k_max]. The columns of each window are
+    unit-normalized before the solver (Algorithm 1, step 1); col_norm=False turns
+    this off (used only by run_hic_tad.py, the original Table 3 pipeline)."""
     def cut(pos, end):
         Y_raw = M_sparse[pos:end, pos:end].toarray()
         keep = np.flatnonzero(Y_raw.any(axis=0))
@@ -468,7 +469,7 @@ def block_tv_cut_fn(M_sparse, min_tad_bins, solver_kwargs, dp_k_min=2, dp_k_max=
             return None, None
         Y_sol = Y.copy()
         np.fill_diagonal(Y_sol, 0.0)
-        if col_norm:
+        if col_norm:   # off only for the original run_hic_tad.py pipeline
             Y_sol /= np.maximum(np.linalg.norm(Y_sol, axis=0, keepdims=True), 1e-12)
         Z, _C, _info = ssc_admm_sparse_block_tv(Y_sol, **solver_kwargs)
         A = np.abs(Z) + np.abs(Z.T)
@@ -478,9 +479,38 @@ def block_tv_cut_fn(M_sparse, min_tad_bins, solver_kwargs, dp_k_min=2, dp_k_max=
     return cut
 
 
+def dpncut_cut_fn(M_sparse, min_tad_bins, dp_k_min=2, dp_k_max=4, dp_k_select="argmax"):
+    """Cutter without SSC: DP-NCut directly on the contact window (diag zeroed),
+    column-normalized and symmetrized as W = |Yn| + |Yn^T| (same preprocessing
+    the SSC arms see)."""
+    def cut(pos, end):
+        Y_raw = M_sparse[pos:end, pos:end].toarray()
+        keep = np.flatnonzero(Y_raw.any(axis=0))
+        if keep.size < 2 * min_tad_bins:
+            return None, None
+        Y = Y_raw[np.ix_(keep, keep)]
+        if not np.isfinite(Y).all() or Y.max() <= 0:
+            return None, None
+        A = Y.copy()
+        np.fill_diagonal(A, 0.0)
+        A /= np.maximum(np.linalg.norm(A, axis=0, keepdims=True), 1e-12)
+        A = np.abs(A) + np.abs(A.T)
+        cuts = dp_ncut_silhouette_cuts(A, Y, min_tad_bins, dp_k_min, dp_k_max, dp_k_select)
+        starts = sorted({pos} | {pos + int(keep[c]) for c in cuts})
+        return starts, None
+    return cut
+
+
+def run_dpncut_tad(M_sparse, n_bins, start_bin, end_bin, window, min_tad_bins,
+                   dp_k_min=2, dp_k_max=4, dp_k_select="argmax", verbose=True):
+    cut = dpncut_cut_fn(M_sparse, min_tad_bins, dp_k_min, dp_k_max, dp_k_select)
+    tads = _scan_region(cut, start_bin, end_bin, window, min_tad_bins, verbose=verbose)
+    return silhouette_postprocess(tads, min_tad_bins)
+
+
 def run_block_tv_tad(M_sparse, n_bins, start_bin, end_bin, window, min_tad_bins,
                      solver_kwargs, dp_k_min=2, dp_k_max=4, dp_k_select="argmax",
-                     verbose=True, col_norm=False):
+                     verbose=True, col_norm=True):
     cut = block_tv_cut_fn(M_sparse, min_tad_bins, solver_kwargs, dp_k_min, dp_k_max,
                           dp_k_select, col_norm)
     tads = _scan_region(cut, start_bin, end_bin, window, min_tad_bins, verbose=verbose)

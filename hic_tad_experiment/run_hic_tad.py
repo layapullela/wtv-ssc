@@ -118,7 +118,8 @@ def run_one_fraction(args, frac, out_dir):
                           tag="test")
         lo, hi = 0, n
         tv_tads = run_block_tv_tad(M, n, lo, hi, WINDOW, MIN_TAD_BINS, SOLVER_KWARGS,
-                                   DP_K_MIN, DP_K_MAX, DP_K_SELECT, verbose=False)
+                                   DP_K_MIN, DP_K_MAX, DP_K_SELECT, verbose=False,
+                                   col_norm=False)
         spec_tads = run_spectral_tad(M, n, lo, hi, WINDOW, MIN_TAD_BINS, verbose=False)
         if frac < 1.0:
             M_full, n_full = load_chrom(args.hic, chrom, args.resolution,

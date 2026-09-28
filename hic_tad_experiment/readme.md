@@ -56,9 +56,12 @@ The best config per arm and depth was frozen and tested on chr2-10 at the same p
 Median IS pooled over all chr2-10 boundaries (IS on the full-depth matrix); p<1 is mean ± sd over downsampling seeds 0-10.
 Seeds TV better = seeds where WTV-SSC < SSC without TV (paired Wilcoxon p = 0.00098 at every p<1).
 
-|p|WTV-SSC|SSC without TV|SpectralTAD|Seeds TV better|
-|---|---|---|---|---|
-|1.00|**−0.3979**|−0.3343|−0.1913|single run|
-|0.75|**−0.3909 ± 0.0027**|−0.3403 ± 0.0035|−0.1860 ± 0.0047|11/11|
-|0.50|**−0.3839 ± 0.0032**|−0.3413 ± 0.0043|−0.1764 ± 0.0069|11/11|
-|0.25|**−0.3412 ± 0.0049**|−0.3321 ± 0.0040|−0.1656 ± 0.0066|11/11|
+|p|WTV-SSC|SSC without TV|SpectralTAD|DP-NCut (col-norm)|Seeds TV better|
+|---|---|---|---|---|---|
+|1.00|**−0.3979**|−0.3343|−0.1913|−0.3922|single run|
+|0.75|**−0.3909 ± 0.0027**|−0.3403 ± 0.0035|−0.1860 ± 0.0047|−0.3856 ± 0.0024|11/11|
+|0.50|**−0.3839 ± 0.0032**|−0.3413 ± 0.0043|−0.1764 ± 0.0069|−0.3772 ± 0.0030|11/11|
+|0.25|−0.3412 ± 0.0049|−0.3321 ± 0.0040|−0.1656 ± 0.0066|**−0.3631 ± 0.0029**|11/11|
+
+DP-NCut (col-norm) baseline = DP-NCut without SSC on the column-normalized window (W = |Yn| + |Yn^T|), same scan and
+silhouette k selection; it has no hyperparameters.
