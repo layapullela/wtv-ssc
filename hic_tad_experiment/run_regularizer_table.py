@@ -4,7 +4,7 @@ for SSC on HIC041, with SpectralTAD as a reference, inference only.
 This experiment is to ablate whether window tv regularizer specifically helps
 SSC for TAD detection task.
 
-Boundaries are called on chr2-10 downsampled to p, insulation score on full depth.
+Boundaries are called on chr4-10 downsampled to p, insulation score on full depth.
 Every method uses the same 2 Mb scan. DP Ncuts w/ silhouette score {2,3,4}
 
   WTV-SSC   column-normalized SSC + sliding-window TV (lambda_2 > 0, b >= 2)
@@ -14,8 +14,9 @@ Every method uses the same 2 Mb scan. DP Ncuts w/ silhouette score {2,3,4}
                   no hyperparameters
 
   
-hyperparms tuned on chr1 (downsampled to each p, seed 0) by minimizing the median IS of
-the called boundaries; lambda_1 grid
+hyperparms tuned on chr1, chr2 and chr3 (the first 8,309 bins of each = same total size as chr1;
+downsampled to each p, seed 0) by minimizing the median IS pooled over the called boundaries;
+lambda_1 grid
 {0.01, 0.02, 0.035, 0.05, 0.075, 0.1, 0.15, 0.2, 0.3, 0.45}; WTV-SSC also searched
 lambda_2 {0.1, 0.2, 0.5, 1, 2} and b {2, 3, 5, 8, 12}.
 
@@ -32,9 +33,9 @@ from scipy.stats import wilcoxon
 from common import (MIN_TAD_BINS, WINDOW, boundary_is_records, compute_insulation_score,
                     load_chrom, run_block_tv_tad, run_dpncut_tad, run_spectral_tad)
 
-HIC041 = "/nfs/turbo/umms-minjilab/lpullela/hic_data/HIC041.hic"
+HIC041 = "/nfs/turbo/umms-minjilab/lpullela/wtv-ssc/archived_wtv_ssc/hic_data/HIC041.hic"
 RESOLUTION = 10_000
-TEST_CHROMS = [str(i) for i in range(2, 11)]
+TEST_CHROMS = [str(i) for i in range(4, 11)]   # chr1-3 were used for tuning
 FRACS = [1.0, 0.75, 0.5, 0.25]
 SEEDS = list(range(11))
 INSULATION_DELTA = 25
@@ -42,10 +43,10 @@ OUT = Path(__file__).resolve().parent / "results" / "regularizer"
 
 SOLVER = dict(max_iter=100, mu_max=10.0, norm_mode="spectral")
 FROZEN = {
-    1.0:  {"WTV-SSC": dict(block_size=8, lambda_1=0.2, lambda_2=0.5), "SSC-noTV": dict(lambda_1=0.01)},
-    0.75: {"WTV-SSC": dict(block_size=12, lambda_1=0.15, lambda_2=0.2), "SSC-noTV": dict(lambda_1=0.02)},
+    1.0:  {"WTV-SSC": dict(block_size=12, lambda_1=0.1, lambda_2=0.2), "SSC-noTV": dict(lambda_1=0.02)},
+    0.75: {"WTV-SSC": dict(block_size=8, lambda_1=0.15, lambda_2=0.5), "SSC-noTV": dict(lambda_1=0.02)},
     0.5:  {"WTV-SSC": dict(block_size=12, lambda_1=0.15, lambda_2=0.2), "SSC-noTV": dict(lambda_1=0.035)},
-    0.25: {"WTV-SSC": dict(block_size=3, lambda_1=0.15, lambda_2=0.5), "SSC-noTV": dict(lambda_1=0.1)},
+    0.25: {"WTV-SSC": dict(block_size=12, lambda_1=0.15, lambda_2=0.2), "SSC-noTV": dict(lambda_1=0.1)},
 }
 METHODS = ["WTV-SSC", "SSC-noTV", "SpectralTAD", "DPNCut-colnorm"]
 
@@ -64,7 +65,7 @@ def call_tads(method, M, n, frac):
 
 
 def run_unit(frac, seed):
-    """Pooled boundary insulation for each method on chr2-10 at (p, seed)."""
+    """Pooled boundary insulation for each method on the test chromosomes at (p, seed)."""
     scores = {m: [] for m in METHODS}
     for chrom in TEST_CHROMS:
         M, n = load_chrom(HIC041, chrom, RESOLUTION, downsample_frac=frac,
@@ -77,7 +78,7 @@ def run_unit(frac, seed):
             scores[m] += [r["insulation"] for r in recs]
             print(f"  chr{chrom} {m:12s} n={len(recs)}", flush=True)
         del M, M_full, ins
-    out = dict(frac=frac, seed=seed, frozen=FROZEN[frac],
+    out = dict(frac=frac, seed=seed, frozen=FROZEN[frac], test_chroms=TEST_CHROMS,
                median_IS={m: float(np.median(v)) for m, v in scores.items()},
                n_boundaries={m: len(v) for m, v in scores.items()})
     OUT.mkdir(parents=True, exist_ok=True)
@@ -87,13 +88,14 @@ def run_unit(frac, seed):
 
 def summarize():
     lines = ["# HIC041: WTV regularizer ON vs OFF (column-normalized SSC)", "",
-             "Median IS pooled over all chr2-10 boundaries (IS on the full-depth matrix). "
+             "Median IS pooled over all chr4-10 boundaries (IS on the full-depth matrix; tuned on chr1-3). "
              "p=1 is a single run; p<1 is mean ± sd over downsampling seeds 0-10.", "",
              "| p | WTV-SSC median IS | SSC (no TV) median IS | SpectralTAD median IS | DP-NCut (col-norm) median IS | seeds WTV < no-TV | paired Wilcoxon p |",
              "|---|---|---|---|---|---|---|"]
     for frac in FRACS:
         runs = [json.loads(f.read_text()) for f in sorted(OUT.glob(f"p_{frac:g}_seed_*.json"))]
-        runs = [r for r in runs if r["frozen"] == FROZEN[frac]   # skip results from other configs
+        runs = [r for r in runs if r["frozen"] == FROZEN[frac]   # skip results from other configs,
+                and r.get("test_chroms") == TEST_CHROMS            # other test chromosomes,
                 and all(m in r["median_IS"] for m in METHODS)]     # or from before a method was added
         if not runs:
             continue
